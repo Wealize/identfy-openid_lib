@@ -33,7 +33,7 @@ import {
 } from '../../common/classes/id_token_request.js';
 import {IdTokenResponse} from '../../common/interfaces/id_token_response.js';
 import {TokenRequest} from '../../common/interfaces/token_request.interface.js';
-import {TokenResponse} from '../../common/interfaces/token_response.interface.js';
+import {TokenResponse, TokenResponseAuthDetails} from '../../common/interfaces/token_response.interface.js';
 import {getAuthentificationJWKKeys} from '../../common/utils/did_document.js';
 import * as RpTypes from './types.js';
 import {
@@ -69,6 +69,7 @@ import {
   PostBaseAuthzNonce,
   RequestVcTypes,
 } from '../nonce/types.js';
+import {AuthDetailsCheckerFactory} from '../../common/classes/checker/auth_details.checker.js';
 
 /**
  * Represents an entity acting as a Reliying Party. As such, it has the
@@ -373,19 +374,30 @@ export class OpenIDReliyingParty {
   ): {nonce: string; state: NonceState} {
     const nonceState = match(purpose)
       .with({type: 'Issuance'}, data => {
-        let vcTypes: RequestVcTypes = {
-          type: 'Uknown',
-        };
+        const requestedCredentials: RequestVcTypes[] = [];
+        let alLeastOneCredentialRequested = false;
         for (const details of purpose.verifiedBaseAuthzRequest.authzRequest
           .authorization_details!) {
-          // TODO: Revise this. Search for a better way to do it.
           if (details.type === OPENID_CREDENTIAL_AUTHZ_DETAILS_TYPE) {
-            vcTypes = {
-              type: 'Know',
-              vcTypes: details.types!,
-            };
-            break;
+            if (details.credential_configuration_id) {
+              alLeastOneCredentialRequested = true;
+              requestedCredentials.push({
+                type: 'Know',
+                credential_id: details.credential_configuration_id,
+              });
+            } else if (details.credential_definition && details.credential_definition.type) {
+              alLeastOneCredentialRequested = true;
+              requestedCredentials.push({
+                type: 'Know',
+                vcTypes: details.credential_definition.type,
+              });
+            }
           }
+        }
+        if (!alLeastOneCredentialRequested) {
+          throw new InsufficienteParamaters(
+            "An Issuance Request must specified at least one credential"
+          );
         }
         if (data.verifiedBaseAuthzRequest.serviceWalletJWK) {
           return {
@@ -404,7 +416,7 @@ export class OpenIDReliyingParty {
             },
             operationType: {
               type: 'Issuance',
-              vcTypes: vcTypes,
+              vcTypes: requestedCredentials,
             },
           };
         }
@@ -432,7 +444,7 @@ export class OpenIDReliyingParty {
           },
           operationType: {
             type: 'Issuance',
-            vcTypes: vcTypes,
+            vcTypes: requestedCredentials,
           },
         };
       })
@@ -494,7 +506,7 @@ export class OpenIDReliyingParty {
     } else {
       // TODO: ADD REQUEST_URI PARAMETER
       if (this.metadata.request_parameter_supported === false) {
-        throw new InvalidRequest('Unsuported request parameter');
+        throw new InvalidRequest('Unsuported "request" parameter');
       }
       const {header, payload} = decodeToken(request.request);
       if (
@@ -551,6 +563,23 @@ export class OpenIDReliyingParty {
           throw new InvalidRequest(
             'Location must contains Issuer client id value',
           );
+        }
+        if (details.type === OPENID_CREDENTIAL_AUTHZ_DETAILS_TYPE) {
+          if (details.credential_configuration_id && details.format) {
+            throw new InvalidRequest(
+              `Both "credential_configuration_id" and "format" can't apperar at the same time`
+            );
+          }
+          if (details.format) {
+            const checkingResult = AuthDetailsCheckerFactory
+              .generateChecker(details.format)
+              .checkData(details);
+            if (checkingResult.isError()) {
+              throw new InvalidRequest(
+                checkingResult.unwrapError()!
+              );
+            }
+          }
         }
         if (this.authzDetailsVerification) {
           const authDetailsVerificationResult =
@@ -884,9 +913,10 @@ export class OpenIDReliyingParty {
     } else {
       operationType = {
         type: 'Issuance',
-        vcTypes: {
-          type: 'Uknown',
-        },
+        vcTypes: [{
+            type: 'Uknown',
+          }
+        ],
       };
     }
     const nonceState: NonceState = {
@@ -921,6 +951,7 @@ export class OpenIDReliyingParty {
     let prevNonce: NonceState | undefined;
     let nonceValue: string | undefined;
     let additionalParams: Record<string, any> = {};
+    const authDetails: TokenResponseAuthDetails[] = [];
     if (
       this.metadata.grant_types_supported &&
       !this.metadata.grant_types_supported.includes(tokenRequest.grant_type)
@@ -934,6 +965,11 @@ export class OpenIDReliyingParty {
         if (!tokenRequest.code) {
           throw new InvalidGrant(
             `Grant type "${tokenRequest.grant_type}" invalid parameters`,
+          );
+        }
+        if (!tokenRequest.client_id) {
+          throw new InvalidRequest(
+            `Grant type "authorization_code" requires the "client_id" parameter`
           );
         }
         await verifyJwtWithExpAndAudience(
@@ -969,9 +1005,6 @@ export class OpenIDReliyingParty {
                 'The token was issued for a diferent client id',
               );
             }
-            // if (data.clientId !== jwtPayload.sub) {
-            //   throw new InvalidRequest("The token was issued for a diferent client id");
-            // }
           })
           .with({type: 'ServiceWallet'}, async data => {
             if (
@@ -997,9 +1030,42 @@ export class OpenIDReliyingParty {
           .exhaustive();
         await match(prevNonce.operationType)
           .with(
-            {type: 'Issuance', vcTypes: {type: 'Know', vcTypes: P.select()}},
+            // TODO: Add support for credential identifiers
+            {type: 'Issuance', vcTypes: P.select()},
             async types => {
-              additionalParams = {vc_types: types};
+              const credentials_types_requested: string[][] = [];
+              const credentials_configuration_id_requested: string[] = [];
+              for (const requestedVc of types) {
+                match(requestedVc)
+                  .with({ type: "Know" },
+                  async data => {
+                    if (data.credential_id) {
+                      credentials_configuration_id_requested.push(data.credential_id);
+                      authDetails.push({
+                        type: OPENID_CREDENTIAL_AUTHZ_DETAILS_TYPE,
+                        credential_configuration_id: data.credential_id,
+                      });
+                    } else if (data.vcTypes) {
+                      credentials_types_requested.push(data.vcTypes);
+                      authDetails.push({
+                        type: OPENID_CREDENTIAL_AUTHZ_DETAILS_TYPE,
+                        format: "jwt_vc_json", // Only supported format for now
+                        credential_definition: {
+                          type: data.vcTypes
+                        }
+                      });
+                    }
+                  })
+              }
+              additionalParams = {};
+              if (credentials_types_requested) {
+                additionalParams.credentials_types_requested
+                  = credentials_types_requested;
+              }
+              if (credentials_configuration_id_requested){
+                additionalParams.credentials_configuration_id_requested
+                  = credentials_configuration_id_requested;
+              }
             },
           )
           .with({type: 'Verification'}, async data => {
@@ -1014,6 +1080,11 @@ export class OpenIDReliyingParty {
             `Grant type "${tokenRequest.grant_type}" invalid parameters`,
           );
         }
+        if (!this.metadata["pre-authorized_grant_anonymous_access_supported"] && !tokenRequest.client_id) {
+          throw new InvalidRequest(
+            "Authorization server does not support anonymous token request with pre-autorized codes"
+          );
+        }
         if (!this.preAuthCallback) {
           throw new InsufficienteParamaters(
             `No verification callback was provided for "${tokenRequest.grant_type}" grant type`,
@@ -1022,7 +1093,7 @@ export class OpenIDReliyingParty {
         const verificationResultPre = await this.preAuthCallback(
           tokenRequest.client_id,
           tokenRequest['pre-authorized_code']!,
-          tokenRequest.user_pin,
+          tokenRequest.tx_code,
         );
         if (verificationResultPre.isError()) {
           throw new InvalidGrant(
@@ -1030,8 +1101,9 @@ export class OpenIDReliyingParty {
           );
         }
         clientId = verificationResultPre.unwrap();
-        if (tokenRequest.user_pin) {
-          additionalParams = {pin: tokenRequest.user_pin};
+        additionalParams = {"pre-auth_flow": true}
+        if (tokenRequest.tx_code) {
+          additionalParams.tx_code = tokenRequest.tx_code;
         }
         break;
       }
@@ -1073,6 +1145,9 @@ export class OpenIDReliyingParty {
       c_nonce: nonce,
       c_nonce_expires_in: this.generalConfiguration.cNonceExpirationTime,
     };
+    if (authDetails.length) {
+      result.authorization_details = authDetails;
+    }
     if (generateIdToken) {
       result.id_token = await this.signCallback(
         {

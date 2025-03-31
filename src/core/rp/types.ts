@@ -83,7 +83,7 @@ export type RequestPurpose =
 
 export interface VerifiedBaseAuthzRequest {
   /**
-   * Client metadata related to supported formats and algorithms that are checked against the PR.
+   * Client metadata related to supported formats and algorithms that are checked against the RP.
    */
   validatedClientMetadata: ValidatedClientMetadata;
   /**

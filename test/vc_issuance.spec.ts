@@ -6,7 +6,7 @@ import {
   W3CVcIssuer
 } from "@/core/credentials/index.js";
 import {
-  AuthzDetailsBuilder,
+  AuthzDetailsBuilderFactory,
   AuthzRequestBuilder,
   CredentialRequest,
   CredentialResponse,
@@ -89,16 +89,24 @@ const signCallback = async (payload: JwtPayload, _supportedAlgs?: JWA_ALGS[]) =>
 
 describe("VC Issuance tests", () => {
 
-  const credentialSupported = [
-    new CredentialSupportedBuilder().withTypes(["VcTest"]).build(),
-    new CredentialSupportedBuilder().withTypes(["DeferredVc"]).build()
-  ];
-
   const vcIssuer = new W3CVcIssuer(
     {
       credential_issuer: issuerUrl,
       credential_endpoint: issuerUrl + "/credential",
-      credentials_supported: credentialSupported
+      credential_configurations_supported: {
+        "VcTest": new CredentialSupportedBuilder().
+          addProofTypeSupported("jwt", ["ES256"])
+          .withTypes(["VcTest"])
+          .build(),
+        "DeferredVc": new CredentialSupportedBuilder()
+          .addProofTypeSupported("jwt", ["ES256"])
+          .withTypes(["DeferredVc"])
+          .build(),
+        "WithId": new CredentialSupportedBuilder()
+          .addProofTypeSupported("jwt", ["ES256"])
+          .withTypes(["VcTestWithId"])
+          .build()
+      }
     },
     new Resolver(getResolver()),
     issuerDid,
@@ -118,7 +126,7 @@ describe("VC Issuance tests", () => {
         if (types.includes("DeferredVc")) {
           return {
             type: "Deferred",
-            deferredCode: "1234"
+            transactionId: "1234"
           }
         }
         return {
@@ -158,9 +166,11 @@ describe("VC Issuance tests", () => {
 
   describe("In-Time flow", () => {
     test("Should successfully issue a VC", async () => {
-      const tokenResponse = await generateTokenResponse("VcTest");
+      const tokenResponse = await generateTokenResponse({ vc: "VcTest" });
       const credentialRequest: CredentialRequest = {
-        types: ["VcTest"],
+        credential_definition: {
+          type: ["VcTest"]
+        },
         format: "jwt_vc_json",
         proof: {
           proof_type: "jwt",
@@ -178,12 +188,120 @@ describe("VC Issuance tests", () => {
       );
       expect(credentialResponse.credential).not.toBeUndefined;
     });
+    test("Should successfully issue a VC using ID", async () => {
+      const tokenResponse = await generateTokenResponse({ configId: "WithId" });
+      const credentialRequest: CredentialRequest = {
+        credential_definition: {
+          type: ["VcTestWithId"]
+        },
+        format: "jwt_vc_json",
+        proof: {
+          proof_type: "jwt",
+          jwt: await generateProof(tokenResponse.c_nonce)
+        }
+      };
+      const accessToken = await vcIssuer.verifyAccessToken(
+        tokenResponse.access_token,
+        issuerJWK
+      );
+      const credentialResponse = await vcIssuer.generateCredentialResponse(
+        accessToken,
+        credentialRequest,
+        W3CDataModel.V2,
+      );
+      expect(credentialResponse.credential).not.toBeUndefined;
+    });
+    test("Should not be possible to request a different VC that the one authorized", async () => {
+      const tokenResponse = await generateTokenResponse({ configId: "WithId" });
+      const credentialRequest: CredentialRequest = {
+        credential_definition: {
+          type: ["VcTest"]
+        },
+        format: "jwt_vc_json",
+        proof: {
+          proof_type: "jwt",
+          jwt: await generateProof(tokenResponse.c_nonce)
+        }
+      };
+      const accessToken = await vcIssuer.verifyAccessToken(
+        tokenResponse.access_token,
+        issuerJWK
+      );
+      await expect(vcIssuer.generateCredentialResponse(
+        accessToken,
+        credentialRequest,
+        W3CDataModel.V2,
+      )).rejects.toThrow();
+    });
+    test("Should not be possible to request a VC using VC ID", async () => {
+      const tokenResponse = await generateTokenResponse({ vc: "VcTest" });
+      const credentialRequest: CredentialRequest = {
+        credential_identifier: "eu.id.not.supported",
+        proof: {
+          proof_type: "jwt",
+          jwt: await generateProof(tokenResponse.c_nonce)
+        }
+      };
+      const accessToken = await vcIssuer.verifyAccessToken(
+        tokenResponse.access_token,
+        issuerJWK
+      );
+      await expect(vcIssuer.generateCredentialResponse(
+        accessToken,
+        credentialRequest,
+        W3CDataModel.V2,
+      )).rejects.toThrow();
+    });
+    test("Should not be possible to combine both vc identifier and format when requesting a VC", async () => {
+      const tokenResponse = await generateTokenResponse({ vc: "VcTest" });
+      const credentialRequest: CredentialRequest = {
+        credential_identifier: "eu.id.not.supported",
+        format: "jwt_vc_json",
+        proof: {
+          proof_type: "jwt",
+          jwt: await generateProof(tokenResponse.c_nonce)
+        }
+      };
+      const accessToken = await vcIssuer.verifyAccessToken(
+        tokenResponse.access_token,
+        issuerJWK
+      );
+      await expect(vcIssuer.generateCredentialResponse(
+        accessToken,
+        credentialRequest,
+        W3CDataModel.V2,
+      )).rejects.toThrow();
+    });
+    test("Should not be possible to request an unssuported credential", async () => {
+      const tokenResponse = await generateTokenResponse({ vc: "DoesNotExist" });
+      const credentialRequest: CredentialRequest = {
+        credential_definition: {
+          type: ["DoesNotExist"]
+        },
+        format: "jwt_vc_json",
+        proof: {
+          proof_type: "jwt",
+          jwt: await generateProof(tokenResponse.c_nonce)
+        }
+      };
+      const accessToken = await vcIssuer.verifyAccessToken(
+        tokenResponse.access_token,
+        issuerJWK
+      );
+      await expect(vcIssuer.generateCredentialResponse(
+        accessToken,
+        credentialRequest,
+        W3CDataModel.V2,
+      )).rejects.toThrow();
+    });
   });
   describe("Deferred flow", () => {
     test("Should successfully issue a VC", async () => {
-      const tokenResponse = await generateTokenResponse("DeferredVc");
+      const tokenResponse = await generateTokenResponse({ vc: "DeferredVc" });
       const credentialRequest: CredentialRequest = {
-        types: ["DeferredVc"],
+        credential_definition: {
+          type: ["DeferredVc"]
+        },
         format: "jwt_vc_json",
         proof: {
           proof_type: "jwt",
@@ -200,9 +318,9 @@ describe("VC Issuance tests", () => {
         credentialRequest,
         W3CDataModel.V2,
       );
-      expect(credentialResponse.acceptance_token).not.toBeUndefined;
+      expect(credentialResponse.transaction_id).not.toBeUndefined;
       credentialResponse = await vcIssuer.exchangeAcceptanceTokenForVc(
-        credentialResponse.acceptance_token!,
+        credentialResponse.transaction_id!,
         W3CDataModel.V2
       );
       expect(credentialResponse.credential).not.toBeUndefined;
@@ -245,7 +363,8 @@ async function generateIdToken(idRequest: IdTokenRequest): Promise<IdTokenRespon
   }
 }
 
-async function generateTokenResponse(vc: string) {
+async function generateTokenResponse(data: { vc?: string, configId?: string }) {
+  const vc = data.vc;
   const rp = new OpenIdRPStepBuilder(
     generateDefaultAuthorisationServerMetadata("https://issuer"),
   )
@@ -285,10 +404,13 @@ async function generateTokenResponse(vc: string) {
     await generateChallenge(codeVerifier),
     "ES256"
   ).addAuthzDetails(
-    AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-      .withTypes(
-        [vc]
-      ).build()
+    vc ? AuthzDetailsBuilderFactory.generateBuilder("openid_credential")
+    .withFormat("jwt_vc_json")
+    .withCredentialTypes([vc])
+    .build() :
+    AuthzDetailsBuilderFactory.generateBuilder("openid_credential")
+    .withCredentialConfiguration("WithId")
+    .build()
   ).build();
   // Verify AuthzRequest
   let verifiedAuthzRequest = await rp.verifyBaseAuthzRequest(

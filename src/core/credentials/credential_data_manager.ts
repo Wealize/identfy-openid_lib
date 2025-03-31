@@ -47,9 +47,9 @@ export abstract class CredentialDataManager {
    * @returns
    */
   async resolveCredentialSubject(
-    _accessTokenSubject: string,
-    proofIssuer: string,
+    accessTokenSubject: string,
+    proofIssuer?: string,
   ): Promise<string> {
-    return proofIssuer;
+    return proofIssuer ? proofIssuer : accessTokenSubject;
   }
 }

@@ -66,7 +66,7 @@ export interface DeferredCredentialData {
   /**
    * A deferred code that can be exchange for a VC
    */
-  deferredCode?: string;
+  transactionId?: string;
 }
 
 export interface CredentialMetadata {

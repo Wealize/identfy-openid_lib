@@ -1,7 +1,7 @@
 import {
   CredentialOffer,
   CredentialOfferGrants,
-  CredentialsOfferData,
+  PreAuthTxCode,
 } from '../interfaces/credential_offer.interface.js';
 import {v4 as uuidv4} from 'uuid';
 
@@ -9,7 +9,7 @@ import {v4 as uuidv4} from 'uuid';
  * Builder class for CredentialOffer
  */
 export class CredentialOfferBuilder {
-  private credentials: CredentialsOfferData[] = [];
+  private credentialConfigId: string[] = [];
   private grants?: CredentialOfferGrants;
 
   /**
@@ -44,22 +44,23 @@ export class CredentialOfferBuilder {
    */
   static preAuthorizeCredentialOffer(
     credential_issuer: string,
-    pinRequired: boolean,
-    preCode?: string,
+    data: {
+      config?: PreAuthTxCode,
+      preCode?: string,
+    } = {}
   ): CredentialOfferBuilder {
     return new CredentialOfferBuilder(credential_issuer).withPreAuthGrant(
-      pinRequired,
-      preCode,
+      data
     );
   }
 
   /**
-   * Add credential information to include in the Offer
-   * @param credentialData The credential information to include in the offer
+   * Add credential configuration ID to include in the Offer
+   * @param configurationId The credential configuration ID
    * @returns This object
    */
-  addCredential(credentialData: CredentialsOfferData): CredentialOfferBuilder {
-    this.credentials.push(credentialData);
+  addCredential(configurationId: string): CredentialOfferBuilder {
+    this.credentialConfigId.push(configurationId);
     return this;
   }
 
@@ -87,23 +88,26 @@ export class CredentialOfferBuilder {
    * @returns This object
    */
   withPreAuthGrant(
-    pinRequired: boolean,
-    preCode?: string,
+    data: {
+      config?: PreAuthTxCode,
+      preCode?: string,
+    } = {}
   ): CredentialOfferBuilder {
+    let preCode = data.preCode;
     if (!preCode) {
       preCode = uuidv4();
     }
     if (!this.grants) {
       this.grants = {
         'urn:ietf:params:oauth:grant-type:pre-authorized_code': {
-          'pre-authorized_code': preCode,
-          user_pin_required: pinRequired,
+          'pre-authorized_code': preCode!,
+          ...data.config
         },
       };
     } else {
       this.grants['urn:ietf:params:oauth:grant-type:pre-authorized_code'] = {
-        'pre-authorized_code': preCode,
-        user_pin_required: pinRequired,
+        'pre-authorized_code': preCode!,
+        ...data.config
       };
     }
     return this;
@@ -116,7 +120,7 @@ export class CredentialOfferBuilder {
   build(): CredentialOffer {
     return {
       credential_issuer: this.credential_issuer,
-      credentials: this.credentials,
+      credential_configuration_ids: this.credentialConfigId,
       grants: this.grants,
     };
   }

@@ -8,7 +8,8 @@ import {CompactVc} from '../types/index.js';
 export interface CredentialResponse {
   format?: W3CVerifiableCredentialFormats;
   credential?: W3CVerifiableCredentialV2 | CompactVc;
-  acceptance_token?: string;
+  transaction_id?: string;
   c_nonce?: string;
   c_nonce_expires_in?: number; // Seconds
+  notification_id?: string;
 }

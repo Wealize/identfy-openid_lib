@@ -6,13 +6,13 @@ import {AuthzResponseType} from '@/types';
  */
 export type RequestVcTypes =
   | {type: 'Uknown'}
-  | {type: 'Know'; vcTypes: string[]};
+  | {type: 'Know'; vcTypes?: string[], credential_id?: string};
 
 /**
  * It sets the Operation type, which be a VC issuance or a Verification
  */
 export type OperationTypeEnum =
-  | {type: 'Issuance'; vcTypes: RequestVcTypes}
+  | {type: 'Issuance'; vcTypes: RequestVcTypes[]}
   | {type: 'Verification'; scope: string};
 
 /**

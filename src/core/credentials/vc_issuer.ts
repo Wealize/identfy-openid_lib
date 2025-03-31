@@ -14,8 +14,14 @@ import {
   W3CDataModel,
   W3CVerifiableCredentialFormats,
 } from '../../common/formats/index.js';
-import {CredentialRequest} from '../../common/interfaces/credential_request.interface.js';
-import {IssuerMetadata} from '../../common/interfaces/issuer_metadata.interface.js';
+import {
+  CredentialRequest,
+  JwtVcJsonCredentialRequest
+} from '../../common/interfaces/credential_request.interface.js';
+import {
+  CredentialConfigurationSupportedForJwtJsonFormat,
+  IssuerMetadata
+} from '../../common/interfaces/issuer_metadata.interface.js';
 import {
   W3CVcSchemaDefinition,
   W3CVerifiableCredential,
@@ -27,7 +33,9 @@ import {
   verifyJwtWithExpAndAudience,
 } from '../../common/utils/jwt.utils.js';
 import {VcFormatter} from './formatters.js';
-import {CredentialResponse} from '../../common/interfaces/credential_response.interface.js';
+import {
+  CredentialResponse
+} from '../../common/interfaces/credential_response.interface.js';
 import * as VcIssuerTypes from './types.js';
 import {
   InternalNonceError,
@@ -35,12 +43,17 @@ import {
   InvalidDataProvided,
   InvalidProof,
   InvalidToken,
+  OpenIdError,
+  Result,
+  UnsupportedCredentialType,
 } from '../../common/classes/index.js';
-import {areDidUrlsSameDid} from '../../common/utils/did.utils.js';
 import {CredentialDataManager} from './credential_data_manager.js';
 import {arraysAreEqual} from '../../common/utils/array.utils.js';
 import {StateManager} from '../state/index.js';
-import {NonceManager} from '../nonce/index.js';
+import {NonceManager, RequestVcTypes} from '../nonce/index.js';
+import {
+  CredentialRequestCheckerFactory
+} from '../../common/classes/checker/credential_request.checker.js';
 
 /**
  * W3C credentials issuer in both deferred and In-Time flows
@@ -81,7 +94,7 @@ export class W3CVcIssuer {
    * @returns Access token in JWT format
    * @throws If data provided is incorrect
    */
-  async verifyAccessToken(
+  async verifyAccessToken( // TODO: REVISE THIS DRAFT 13
     token: string,
     publicKeyJwkAuthServer: JWK,
     tokenVerifyCallback?: VcIssuerTypes.AccessTokenVerifyCallback,
@@ -120,14 +133,34 @@ export class W3CVcIssuer {
     credentialRequest: CredentialRequest,
     dataModel: W3CDataModel,
   ): Promise<CredentialResponse> {
-    this.checkCredentialTypesAndFormat(
-      credentialRequest.types,
-      credentialRequest.format,
-    );
-    const controlProof = ControlProof.fromJSON(credentialRequest.proof);
-    const proofAssociatedClient = controlProof.getAssociatedIdentifier();
+    // TODO: PENDING TO ANALYZE credential_definition.credential_subject to detect what claims are mandatory
+    // TODO: Add support for credential identifiers
+    // TODO: For the time being, this version does not support requesting credentials using the scope parameter
     const jwtPayload = acessToken.payload as JwtPayload;
     const innerNonce = jwtPayload.nonce as string;
+    if (credentialRequest.credential_identifier && credentialRequest.format) {
+      throw new InvalidCredentialRequest(
+        `Both "credential_identifier" and "format" parameters can not be present at the same time`
+      );
+    }
+    if (credentialRequest.credential_identifier) {
+      // TODO: For the time being, this version does not support credentials identifiers
+      throw new UnsupportedCredentialType(
+        `Credential identifiers are not supported`
+      );
+    }
+    if (!credentialRequest.format) {
+      // TODO: For the time being, this version only supports requesting credentials using format parameter
+      throw new InvalidCredentialRequest(
+        `Credentials request is missing parameter "format"`
+      );
+    }
+    const credentialFormatCheckResult = CredentialRequestCheckerFactory.
+      generateChecker(credentialRequest.format)
+      .checkData(credentialRequest);
+    if (credentialFormatCheckResult.isError()) {
+      throw new InvalidCredentialRequest(credentialFormatCheckResult.unwrapError());
+    }
     const cNonceResult = await this.nonceManager.getChallengeNonce(innerNonce);
     if (cNonceResult.isError()) {
       throw new InvalidProof('Invalid provided nonce for control proof');
@@ -137,34 +170,66 @@ export class W3CVcIssuer {
       await this.nonceManager.deleteNonce(innerNonce);
       throw new InvalidCredentialRequest('Challenge nonce has expired');
     }
+    let vcConfigurationData: CredentialConfigurationSupportedForJwtJsonFormat;
     match(cNonce)
       .with({operationType: {type: 'Verification'}}, _ => {
         throw new InvalidCredentialRequest('Invalid provided nonce');
       })
-      .with(
-        {
-          operationType: {
-            type: 'Issuance',
-            vcTypes: {type: 'Know', vcTypes: P.select()},
-          },
-        },
-        types => {
-          if (!areDidUrlsSameDid(proofAssociatedClient, jwtPayload.sub!)) {
-            throw new InvalidToken(
-              'Access Token was issued for a different identifier that the one that sign the proof',
-            );
+      .with({operationType: { type: 'Issuance', vcTypes: P.select()}},
+        (vcTypes) => {
+          const types = vcTypes as RequestVcTypes[];
+          let validTypeFlag = false;
+          for (const requestVcTypes of vcTypes) {
+            match(requestVcTypes)
+              .with({ type: "Uknown" }, _ => {
+                // Most probably generated from pre-auth flow
+              })
+              .with(
+                {
+                  type: "Know",
+                  vcTypes: P.select("validTypes"),
+                },
+                ({validTypes}) => {
+                  const typesCheck = this.checkCredentialType(
+                    credentialRequest as JwtVcJsonCredentialRequest, // For now we only support this format
+                    validTypes!,
+                  );
+                  if (typesCheck.isOk()) {
+                    vcConfigurationData = typesCheck.unwrap();
+                    validTypeFlag = true;
+                  }
+              }).with(
+                {
+                  type: "Know",
+                  credential_id: P.select("validId")
+                },
+                ({validId}) => {
+                  const typesCheck = this.checkCredentialType(
+                    credentialRequest as JwtVcJsonCredentialRequest, // For now we only support this format
+                    undefined,
+                    validId
+                  );
+                  if (typesCheck.isOk()) {
+                    vcConfigurationData = typesCheck.unwrap();
+                    validTypeFlag = true;
+                  }
+                }
+              )
+              if (validTypeFlag) {
+                break;
+              }
           }
-          if (!arraysAreEqual(types as string[], credentialRequest.types)) {
+          if (!validTypeFlag) {
             throw new InvalidCredentialRequest(
               'The provided token does not allow for the issuance of a VC of the specified types',
             );
           }
-        },
-      )
-      .with(
-        {operationType: {type: 'Issuance', vcTypes: {type: 'Uknown'}}},
-        _ => {
-          // Most probably generated from pre-auth flow
+          // TODO: VERIFY IF NEEDED
+          // if (!areDidUrlsSameDid(proofAssociatedClient, jwtPayload.sub!)) {
+          //   throw new InvalidToken(
+          //     'Access Token was issued for a different identifier that the one that sign the proof',
+          //   );
+          // }
         },
       )
       .otherwise(() => {
@@ -172,18 +237,33 @@ export class W3CVcIssuer {
           'Unexpected behaviour detected at nonce matching',
         );
       });
-    await controlProof.verifyProof(
-      innerNonce,
-      this.metadata.credential_issuer,
-      this.didResolver,
-    );
+    let proofAssociatedClient
+    if (vcConfigurationData!.proof_types_supported) {
+      const controlProof = ControlProof.fromJSON(credentialRequest.proof);
+      proofAssociatedClient = controlProof.getAssociatedIdentifier();
+      const supportedAlgs = this.getSupportAlgForProof(
+        vcConfigurationData!,
+        controlProof.format
+      );
+
+      if (supportedAlgs.isError()) {
+        throw supportedAlgs.unwrapError();
+      }
+
+      await controlProof.verifyProof(
+        innerNonce,
+        this.metadata.credential_issuer,
+        this.didResolver,
+        supportedAlgs.unwrap()
+      );
+    }
     const credentialSubject =
       await this.credentialDataManager.resolveCredentialSubject(
         jwtPayload.sub!,
         proofAssociatedClient,
       );
     const credentialResponse = await this.credentialResponseMatch(
-      credentialRequest.types,
+      (credentialRequest as JwtVcJsonCredentialRequest).credential_definition.type,
       credentialSubject,
       credentialRequest.format,
       dataModel,
@@ -216,7 +296,7 @@ export class W3CVcIssuer {
       )
       .with({type: 'Deferred'}, data => {
         return {
-          acceptance_token: data.deferredCode,
+          transaction_id: data.transactionId,
         };
       })
       .exhaustive();
@@ -233,11 +313,18 @@ export class W3CVcIssuer {
   async generateVcDirectMode(
     did: string,
     dataModel: W3CDataModel,
-    types: string[],
-    format: W3CVerifiableCredentialFormats,
+    credentialConfigurationId: string
   ): Promise<CredentialResponse> {
-    this.checkCredentialTypesAndFormat(types, format);
-    return await this.credentialResponseMatch(types, did, format, dataModel);
+    const configurationData = this.metadata.credential_configurations_supported[
+      credentialConfigurationId
+    ];
+    if (!configurationData) {
+      throw new InvalidCredentialRequest(
+        "Unssuported Credential Configuration ID provided"
+      );
+    }
+    return await this.credentialResponseMatch(
+      configurationData.credential_definition.type, did, "jwt_vc_json", dataModel);
   }
 
   // TODO: valorar quitar iss de 'CredentialDataOrDeferred' y homogeneizar comportamiento entre V1 y V2
@@ -404,10 +491,12 @@ export class W3CVcIssuer {
       sub: subject,
       operationType: {
         type: 'Issuance',
-        vcTypes: {
-          type: 'Know',
-          vcTypes: type,
-        },
+        vcTypes: [ // TODO: The new nonce should allow to request the same credentials as before
+          {
+            type: "Know",
+            vcTypes: type
+          }
+        ],
       },
       type: 'ChallengeNonce',
       expirationTime,
@@ -453,28 +542,55 @@ export class W3CVcIssuer {
       )
       .with({type: 'Deferred'}, data => {
         return {
-          acceptance_token: data.deferredCode,
+          transaction_id: data.transactionId,
         };
       })
       .exhaustive();
   }
 
-  private checkCredentialTypesAndFormat(
-    types: string[],
-    format: W3CVerifiableCredentialFormats,
-  ) {
-    const typesSet = new Set(types);
-    for (const credentialSupported of this.metadata.credentials_supported) {
-      const supportedSet = new Set(credentialSupported.types);
-      if (
-        [...typesSet].every(item => supportedSet.has(item)) &&
-        credentialSupported.format === format
-      ) {
-        return;
+  private checkCredentialType(
+    request: JwtVcJsonCredentialRequest,
+    validTypes?: string[],
+    validId?: string
+  ): Result<CredentialConfigurationSupportedForJwtJsonFormat, string> {
+    const requestedTypes = request.credential_definition.type;
+    if (validId) {
+      const configData = this.metadata.credential_configurations_supported[validId];
+      if (configData && configData.format === "jwt_vc_json") {
+        if (arraysAreEqual(requestedTypes, configData.credential_definition.type)) {
+          return Result.Ok(this.metadata.credential_configurations_supported[validId]);
+        }
       }
     }
-    throw new InvalidCredentialRequest(
-      'Unsuported combination of credential types and format',
+    if (validTypes && arraysAreEqual(requestedTypes, validTypes)) {
+      for (const vcConfigId in this.metadata.credential_configurations_supported) {
+        const vcConfigData = this.metadata.credential_configurations_supported[vcConfigId];
+        if (vcConfigData.format === "jwt_vc_json") {
+          if (arraysAreEqual(
+            request.credential_definition.type,
+            vcConfigData.credential_definition.type
+          )) {
+            return Result.Ok(
+              this.metadata.credential_configurations_supported[vcConfigId]
+            );
+          }
+        }
+      }
+    }
+    return Result.Err("Unsuported combination of credential types and format");
+  }
+
+  private getSupportAlgForProof(
+    vcConfigurationData: CredentialConfigurationSupportedForJwtJsonFormat,
+    proofType: string
+  ): Result<string[], OpenIdError> {
+    if (!Object.keys(vcConfigurationData.proof_types_supported!).includes(proofType)) {
+      return Result.Err(new InvalidProof("Unssuported proof type for requested credential"));
+    }
+    return Result.Ok(
+      vcConfigurationData.proof_types_supported![
+        proofType
+      ]["proof_signing_alg_values_supported"]
     );
   }
 }

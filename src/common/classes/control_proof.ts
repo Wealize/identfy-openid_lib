@@ -38,6 +38,7 @@ export abstract class ControlProof {
     cNonce: string,
     audience: string,
     didResolver: Resolvable,
+    validAlgs?: string[]
   ): Promise<void>;
 
   /**

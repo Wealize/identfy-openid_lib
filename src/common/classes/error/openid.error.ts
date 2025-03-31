@@ -68,6 +68,12 @@ export class InvalidToken extends OpenIdError {
   }
 }
 
+export class InvalidEncryptionParameters extends OpenIdError {
+  constructor(message: string) {
+    super("invalid_encryption_parameters", message, 400);
+  }
+}
+
 export class InsufficientScope extends OpenIdError {
   constructor(message: string, redirectUri?: string, holderState?: string) {
     super('insufficient_scope', message, 403, redirectUri, holderState);

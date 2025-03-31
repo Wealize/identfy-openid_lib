@@ -40,7 +40,7 @@ export class OpenIdRPStepBuilder {
     | ((
         clientId: string | undefined,
         preCode: string,
-        pin?: string,
+        txCode?: string,
       ) => Promise<Result<string, Error>>) = undefined;
   private generalConfiguration: RpConfiguration = {
     idTokenExpirationTime: ID_TOKEN_REQUEST_DEFAULT_EXPIRATION_TIME,
@@ -102,7 +102,7 @@ export class OpenIdRPStepBuilder {
     callback: (
       clientId: string | undefined,
       preCode: string,
-      pin?: string,
+      txCode?: string,
     ) => Promise<Result<string, Error>>,
   ) {
     this.preAuthCallback = callback;

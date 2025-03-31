@@ -1,21 +1,25 @@
-import {v4 as uuidv4} from 'uuid';
-import {W3CVerifiableCredentialFormats} from '../formats/index.js';
+import { W3CVerifiableCredentialFormats } from '../formats/index.js';
 import {
-  CredentialSupported,
+  CredentialConfigurationSupportedForJwtJsonFormat,
   IssuerMetadata,
+  JwtVcJsonFormatCreentialSubject,
   VerifiableCredentialDisplay,
 } from '../interfaces/issuer_metadata.interface.js';
-import {isHttps} from '../utils/index.js';
-import {InternalNonceError} from '../classes/index.js';
+import { isHttps } from '../utils/index.js';
+import { InvalidDataProvided } from '../classes/index.js';
 
 /**
  * Builder class for Credential Issuer Metadata
  */
 export class IssuerMetadataBuilder {
+  // For now, the Library does not support encryption or identifiers
+  // For now, we dont support notification endpoint
   private authorization_server?: string;
   private deferred_credential_endpoint?: string;
   private batch_credential_endpoint?: string;
-  private credentials_supported: Map<string, CredentialSupported> = new Map();
+  private credential_configurations_supported: Record<
+    string, CredentialConfigurationSupportedForJwtJsonFormat
+  > = {};
   /**
    * Constructor of IssuerMetadataBuilder
    * @param credential_issuer URI of the credential issuer
@@ -32,12 +36,10 @@ export class IssuerMetadataBuilder {
   ) {
     if (imposeHttps) {
       if (!isHttps(credential_issuer)) {
-        // TODO: Define error enum
-        throw new InternalNonceError('Is not https');
+        throw new InvalidDataProvided('Is not https');
       }
       if (!isHttps(credential_endpoint)) {
-        // TODO: Define error enum
-        throw new InternalNonceError('Is not https');
+        throw new InvalidDataProvided('Is not https');
       }
     }
   }
@@ -45,8 +47,7 @@ export class IssuerMetadataBuilder {
   private assertUrlIsHttps(url: string, assertedParameter: string) {
     if (this.imposeHttps) {
       if (!isHttps(url)) {
-        // TODO: Define error enum
-        throw new InternalNonceError(`${assertedParameter} is not https`);
+        throw new InvalidDataProvided(`${assertedParameter} is not https`);
       }
     }
   }
@@ -91,19 +92,14 @@ export class IssuerMetadataBuilder {
    * @throws If the credential already exists
    */
   addCredentialSupported(
-    supportedCredential: CredentialSupported,
+    credentialId: string,
+    credentialInformation: CredentialConfigurationSupportedForJwtJsonFormat
   ): IssuerMetadataBuilder {
-    let id: string;
-    if (!supportedCredential.id) {
-      id = uuidv4();
-    } else {
-      if (this.credentials_supported.get(supportedCredential.id)) {
-        // TODO: Define error enum
-        throw new InternalNonceError('Credential supported already defined');
-      }
-      id = supportedCredential.id;
+    if (this.credential_configurations_supported[credentialId]) {
+      // TODO: Define error enum
+      throw new InvalidDataProvided('Credential supported already defined');
     }
-    this.credentials_supported.set(id, supportedCredential);
+    this.credential_configurations_supported[credentialId] = credentialInformation;
     return this;
   }
 
@@ -114,11 +110,14 @@ export class IssuerMetadataBuilder {
   build(): IssuerMetadata {
     return {
       credential_issuer: this.credential_issuer,
-      authorization_server: this.authorization_server,
+      authorization_server: this.authorization_server ? [
+        this.authorization_server
+      ] : undefined,
       credential_endpoint: this.credential_endpoint,
       deferred_credential_endpoint: this.deferred_credential_endpoint,
       batch_credential_endpoint: this.batch_credential_endpoint,
-      credentials_supported: Array.from(this.credentials_supported.values()),
+      credential_identifiers_supported: false, // HARDCODED until feature is added
+      credential_configurations_supported: this.credential_configurations_supported,
     };
   }
 }
@@ -127,30 +126,25 @@ export class IssuerMetadataBuilder {
  * Builder class for Credential Supported objects in Credential Issuer Metadata
  */
 export class CredentialSupportedBuilder {
-  private format: W3CVerifiableCredentialFormats = 'jwt_vc_json';
-  private id?: string;
+  private scope?: string;
+  private cryptographic_binding_methods_supported?: string[];
+  private credential_signing_alg_values_supported?: string[];
+  private proof_types_supported?: Record<string,
+    { proof_signing_alg_values_supported: string[] }
+  >;
+  private credentialSubject?: Record<string,
+    JwtVcJsonFormatCreentialSubject | JwtVcJsonFormatCreentialSubject[]
+  >;
   private types: string[] = [];
   private display?: VerifiableCredentialDisplay[];
 
   /**
-   * Set the format of the credential. By default "jwt_vc_json".
-   * @param format The W3C VC format
+   * Set the Scope of the credential issuance flow
+   * @param id The scope of the flow
    * @returns This object
    */
-  withFormat(
-    format: W3CVerifiableCredentialFormats,
-  ): CredentialSupportedBuilder {
-    this.format = format;
-    return this;
-  }
-
-  /**
-   * Set the ID of the credential
-   * @param id The id of the credential
-   * @returns This object
-   */
-  withId(id: string): CredentialSupportedBuilder {
-    this.id = id;
+  withScope(scope: string): CredentialSupportedBuilder {
+    this.scope = scope;
     return this;
   }
 
@@ -177,19 +171,63 @@ export class CredentialSupportedBuilder {
     return this;
   }
 
+  addBindingMethodSupported(method: "jwk" | string) {
+    if (!this.cryptographic_binding_methods_supported) {
+      this.cryptographic_binding_methods_supported = [];
+    }
+    this.cryptographic_binding_methods_supported.push(method);
+    return this;
+  }
+
+  addCredentialSigningAlg(alg: string) {
+    if (!this.credential_signing_alg_values_supported) {
+      this.credential_signing_alg_values_supported = [];
+    }
+    this.credential_signing_alg_values_supported.push(alg);
+    return this;
+  }
+
+  addProofTypeSupported(type: string, algs_supported: string[]) {
+    if (!this.proof_types_supported) {
+      this.proof_types_supported = {};
+    }
+    this.proof_types_supported[type] = {
+      proof_signing_alg_values_supported: algs_supported
+    }
+    return this;
+  }
+
+  withCredentialSubjectDefinition(
+    claim: string,
+    data: JwtVcJsonFormatCreentialSubject | JwtVcJsonFormatCreentialSubject[]
+  ) {
+    if (!this.credentialSubject) {
+      this.credentialSubject = {};
+    }
+    this.credentialSubject[claim] = data;
+    return this;
+  }
+
   /**
    * Generate CredentialSupported from the data contained in this builder
    * @returns CredentialSupported instance
    */
-  build(): CredentialSupported {
+  build(): CredentialConfigurationSupportedForJwtJsonFormat {
     return {
-      format: this.format,
-      id: this.id,
-      types: this.types,
-      display: this.display,
+      scope: this.scope,
+      cryptographic_binding_methods_supported: this.cryptographic_binding_methods_supported,
+      credential_signing_alg_values_supported: this.credential_signing_alg_values_supported,
+      proof_types_supported: this.proof_types_supported as any,
+      credential_definition: {
+        type: this.types,
+        credentialSubject: this.credentialSubject
+      },
+      format: "jwt_vc_json",
     };
   }
 }
+
+// TODO: REVISAR EN CREDENTIAL REQUEST LOS TIPOS DE PRUEBAS SOPORTADOS
 
 /**
  * Builder for VC display information in CredentialSupported objects
@@ -199,11 +237,12 @@ export class VerifiableCredentialDisplayBuilder {
    * Constructor of VerifiableCredentialDisplayBuilder
    * @param name String value of a display name for the Credential Issuer.
    */
-  constructor(private name: string) {}
+  constructor(private name: string) { }
   private locale?: string;
-  private logo?: JSON;
-  private url?: string;
-  private alt_text?: string;
+  private logo?: {
+    uri: string,
+    alt_text?: string,
+  };
   private description?: string;
   private background_color?: string;
   private text_color?: string;
@@ -224,28 +263,11 @@ export class VerifiableCredentialDisplayBuilder {
    * @param logo Logo information
    * @returns This object
    */
-  withLogo(logo: JSON): VerifiableCredentialDisplayBuilder {
+  withLogo(logo: {
+    uri: string,
+    alt_text?: string,
+  }): VerifiableCredentialDisplayBuilder {
     this.logo = logo;
-    return this;
-  }
-
-  /**
-   * Set the "url" attribute of the display information
-   * @param url The URL itself
-   * @returns This object
-   */
-  withUrl(url: string): VerifiableCredentialDisplayBuilder {
-    this.url = url;
-    return this;
-  }
-
-  /**
-   * Set the "alt_text" attribute of the display information
-   * @param text The text for the attribute
-   * @returns This object
-   */
-  withAltText(text: string): VerifiableCredentialDisplayBuilder {
-    this.alt_text = text;
     return this;
   }
 
@@ -288,8 +310,6 @@ export class VerifiableCredentialDisplayBuilder {
       name: this.name,
       locale: this.locale,
       logo: this.logo,
-      url: this.url,
-      alt_text: this.alt_text,
       description: this.description,
       background_color: this.background_color,
       text_color: this.text_color,

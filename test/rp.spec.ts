@@ -1,5 +1,5 @@
 import {
-  AuthzDetailsBuilder,
+  AuthzDetailsBuilderFactory,
   AuthzRequestBuilder,
   CredentialOfferBuilder,
   IdTokenRequest,
@@ -60,6 +60,15 @@ const signCallback = async (payload: JwtPayload, _supportedAlgs?: JWA_ALGS[]) =>
     .sign(keyLike);
 };
 
+function buildAuthzDetails() {
+  const authzDetailsBuilder =
+    AuthzDetailsBuilderFactory.generateBuilder("openid_credential");
+  return authzDetailsBuilder
+    .withFormat("jwt_vc_json")
+    .withCredentialTypes(["TestVc"])
+    .build()
+}
+
 describe("Reliying Party tests", () => {
   const rp = new OpenIdRPStepBuilder(
     {
@@ -70,8 +79,8 @@ describe("Reliying Party tests", () => {
       ]
     }
   )
-    .withPreAuthCallback(async (clientId, preCode, pin) => {
-      if (preCode !== "123" || pin !== "444") {
+    .withPreAuthCallback(async (clientId, preCode, txCode) => {
+      if (preCode !== "123" || txCode !== "444") {
         return Result.Err(new Error("Invalid"));
       }
       return Result.Ok(holderDid);
@@ -115,12 +124,7 @@ describe("Reliying Party tests", () => {
           {},
           await generateChallenge(codeVerifier),
           "ES256"
-        ).addAuthzDetails(
-          AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-            .withTypes(
-              ["TestVc"]
-            ).build()
-        ).build();
+        ).addAuthzDetails(buildAuthzDetails()).build();
         // Verify AuthzRequest
         let verifiedAuthzRequest = await rp.verifyBaseAuthzRequest(
           authzRequest,
@@ -195,12 +199,7 @@ describe("Reliying Party tests", () => {
         {},
         await generateChallenge("test"),
         "ES256"
-      ).addAuthzDetails(
-        AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-          .withTypes(
-            ["TestVc"]
-          ).build()
-      ).build();
+      ).addAuthzDetails(buildAuthzDetails()).build();
       // Verify AuthzRequest
       await expect(newRp.verifyBaseAuthzRequest(
         authzRequest,
@@ -243,12 +242,7 @@ describe("Reliying Party tests", () => {
         {},
         await generateChallenge("test"),
         "ES256"
-      ).addAuthzDetails(
-        AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-          .withTypes(
-            ["TestVc"]
-          ).build()
-      )
+      ).addAuthzDetails(buildAuthzDetails())
       .withScope("openid invalid_scope")
       .build();
       // Verify AuthzRequest
@@ -293,12 +287,8 @@ describe("Reliying Party tests", () => {
         {},
         await generateChallenge("test"),
         "ES256"
-      ).addAuthzDetails(
-        AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-          .withTypes(
-            ["TestVc"]
-          ).build()
-      ).build();
+      ).addAuthzDetails(buildAuthzDetails())
+      .build();
       // Verify AuthzRequest
       await expect(newRp.verifyBaseAuthzRequest(
         authzRequest,
@@ -367,7 +357,8 @@ describe("Reliying Party tests", () => {
       // Create Token Request
       const tokenRequest: TokenRequest = {
         grant_type: "vp_token",
-        client_id: holderDid
+        client_id: holderDid,
+        vp_token: "ey..."
       };
       await expect(rp.generateAccessToken(
         tokenRequest,
@@ -387,12 +378,7 @@ describe("Reliying Party tests", () => {
           {},
           await generateChallenge(codeVerifier),
           "ES256"
-        ).addAuthzDetails(
-          AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-            .withTypes(
-              ["TestVc"]
-            ).build()
-        ).build();
+        ).addAuthzDetails(buildAuthzDetails()).build();
         let verifiedAuthzRequest = await rp.verifyBaseAuthzRequest(
           authzRequest,
         );
@@ -438,12 +424,7 @@ describe("Reliying Party tests", () => {
           {},
           await generateChallenge("test"),
           "ES256"
-        ).addAuthzDetails(
-          AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-            .withTypes(
-              ["TestVc"]
-            ).build()
-        ).build();
+        ).addAuthzDetails(buildAuthzDetails()).build();
         // Verify AuthzRequest
         let verifiedAuthzRequest = await rp.verifyBaseAuthzRequest(
           authzRequest,
@@ -482,18 +463,20 @@ describe("Reliying Party tests", () => {
   });
   test("Access Token generation with pre-auth code", async () => {
     const credentialOffer = new CredentialOfferBuilder(authServerUrl)
-      .withPreAuthGrant(true, "123")
-      .addCredential({
-        format: "jwt_vc_json",
-        types: ["VcTest"]
+      .withPreAuthGrant({
+        preCode: "123",
+        config: {
+          input_mode: "numeric"
+        }
       })
+      .addCredential("VcTest")
       .build()
     // Create Token Request
     const tokenRequest: TokenRequest = {
       grant_type: "urn:ietf:params:oauth:grant-type:pre-authorized_code",
       client_id: holderDid,
-      "pre-authorized_code": credentialOffer.grants?.["urn:ietf:params:oauth:grant-type:pre-authorized_code"]?.["pre-authorized_code"],
-      user_pin: "444"
+      "pre-authorized_code": credentialOffer.grants!["urn:ietf:params:oauth:grant-type:pre-authorized_code"]!["pre-authorized_code"],
+      tx_code: "444"
     };
     await expect(rp.generateAccessToken(
       tokenRequest,

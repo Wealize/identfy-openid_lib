@@ -25,5 +25,7 @@ export interface AuthServerMetadata {
   vp_formats_supported?: VpFormatsSupported;
   subject_syntax_types_supported?: string[];
   subject_trust_frameworks_supported?: string[];
-  id_token_types_supported?: string[];
+  id_token_types_supported?: string[],
+  // Section 11.3 Draft 13 OID4VCI
+  "pre-authorized_grant_anonymous_access_supported"?: boolean
 }

@@ -1,5 +1,5 @@
 import {
-  AuthzDetailsBuilder,
+  AuthzDetailsBuilderFactory,
   AuthzRequestBuilder,
   CONTEXT_VC_DATA_MODEL_2,
   CredentialDataManager,
@@ -112,15 +112,20 @@ describe("VP Verification tests", () => {
   let secondVc: string | W3CVerifiableCredentialV2;
   beforeAll(async () => {
     // Generate some credentials to include in the VP
-    const credentialSupported = [
-      new CredentialSupportedBuilder().withTypes(["VcTestOne"]).build(),
-      new CredentialSupportedBuilder().withTypes(["VcTestTwo"]).build()
-    ];
     const vcIssuer = new W3CVcIssuer(
       {
         credential_issuer: authServerUrl,
         credential_endpoint: authServerUrl + "/credential",
-        credentials_supported: credentialSupported
+        credential_configurations_supported: {
+          "VcTestOne": new CredentialSupportedBuilder().
+            addProofTypeSupported("jwt", ["ES256"])
+            .withTypes(["VcTestOne"])
+            .build(),
+          "VcTestTwo": new CredentialSupportedBuilder()
+            .addProofTypeSupported("jwt", ["ES256"])
+            .withTypes(["VcTestTwo"])
+            .build(),
+        }
       },
       new Resolver(getResolver()),
       issuerDid,
@@ -140,7 +145,7 @@ describe("VP Verification tests", () => {
           if (types.includes("DeferredVc")) {
             return {
               type: "Deferred",
-              deferredCode: "1234"
+              transactionId: "1234"
             }
           }
           return {
@@ -180,7 +185,9 @@ describe("VP Verification tests", () => {
     );
     let tokenResponse = await generateTokenResponse("VcTestOne");
     let credentialRequest: CredentialRequest = {
-      types: ["VcTestOne"],
+      credential_definition: {
+        type: ["VcTestOne"]
+      },
       format: "jwt_vc_json",
       proof: {
         proof_type: "jwt",
@@ -198,7 +205,9 @@ describe("VP Verification tests", () => {
     tokenResponse = await generateTokenResponse("VcTestTwo");
     verifiedToken = await vcIssuer.verifyAccessToken(tokenResponse.access_token, issuerJWK);
     credentialRequest = {
-      types: ["VcTestTwo"],
+      credential_definition: {
+        type: ["VcTestTwo"]
+      },
       format: "jwt_vc_json",
       proof: {
         proof_type: "jwt",
@@ -890,10 +899,10 @@ async function generateTokenResponse(vc: string) {
     await generateChallenge(codeVerifier),
     "ES256"
   ).addAuthzDetails(
-    AuthzDetailsBuilder.openIdCredentialBuilder("jwt_vc_json")
-      .withTypes(
-        [vc]
-      ).build()
+    AuthzDetailsBuilderFactory.generateBuilder("openid_credential")
+      .withFormat("jwt_vc_json")
+      .withCredentialTypes([vc])
+      .build()
   ).build();
   // Verify AuthzRequest
   let verifiedAuthzRequest = await rp.verifyBaseAuthzRequest(
