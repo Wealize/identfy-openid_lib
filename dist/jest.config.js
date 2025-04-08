@@ -7,7 +7,7 @@ const jestConfig = {
     extensionsToTreatAsEsm: ['.ts'],
     testTimeout: 500000, // Set to a higher value for debug
     transform: {
-        '^.+\\.ts$': ['ts-jest', {
+        '^.+\\.spec\\.ts$': ['ts-jest', {
                 tsconfig: 'tsconfig.test.json',
                 useESM: true
             }],

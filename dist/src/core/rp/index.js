@@ -191,6 +191,48 @@ export class OpenIDReliyingParty {
         await this.nonceManager.saveNonce(nonce, nonceState);
         return new VpTokenRequest(requestParams, vpToken, '');
     }
+    async directIdTokenRequestForVerification(redirectUri, additionalParameters) {
+        // TODO: Refactor this method in the future. Too similar to createIdTokenRequest but also to directVpTokenRequestForVerification
+        additionalParameters = {
+            ...{
+                responseMode: 'direct_post',
+                scope: DEFAULT_SCOPE,
+                expirationTime: this.generalConfiguration.vpTokenExpirationTIme,
+            },
+            ...additionalParameters,
+        };
+        const nonceState = {
+            type: 'DirectRequest',
+            operationType: {
+                type: 'Verification',
+                scope: additionalParameters.scope,
+            },
+            responseType: 'id_token',
+            timestamp: Date.now(),
+            sub: 'https://self-issued.me/v2',
+        };
+        const nonce = uuidv4();
+        const requestParams = {
+            response_type: 'id_token',
+            scope: additionalParameters.scope,
+            redirect_uri: redirectUri,
+            response_mode: additionalParameters.responseMode,
+            nonce: nonce,
+            client_id: this.metadata.issuer,
+        };
+        if (additionalParameters.state) {
+            requestParams.state = additionalParameters.state;
+        }
+        const idToken = await this.signCallback({
+            aud: 'https://self-issued.me/v2',
+            iss: this.metadata.issuer,
+            exp: nonceState.timestamp + additionalParameters.expirationTime,
+            ...requestParams,
+            ...additionalParameters.additionalPayload,
+        }, this.metadata.request_object_signing_alg_values_supported);
+        await this.nonceManager.saveNonce(nonce, nonceState);
+        return new IdTokenRequest(requestParams, idToken, '');
+    }
     /**
      * Allows to create a new Authorisation request in which an VP Token
      * is requested
