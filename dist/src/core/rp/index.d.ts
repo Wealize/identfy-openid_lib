@@ -21,6 +21,7 @@ import { StateManager } from '../state/index.js';
  * The "grant_type" "authorisation_code" and "pre-authorised_code" are supported
  * for authentication. The first one is always active. In order to facilitate the
  * building of the objects from this class, a builder has been developed.
+ * @class OpenIDReliyingParty
  */
 export declare class OpenIDReliyingParty {
     private defaultHolderMetadata;
@@ -63,100 +64,118 @@ export declare class OpenIDReliyingParty {
      */
     constructor(defaultHolderMetadata: HolderMetadata, metadata: AuthServerMetadata, didResolver: Resolver, signCallback: RpTypes.TokenSignCallback, scopeVerificationFlag: boolean, stateManager: StateManager, subjectComparison: (firstId: string, secondId: string) => boolean, generalConfiguration: RpTypes.RpConfiguration, issuerStateVerirication?: ((state: string) => Promise<Result<null, Error>>) | undefined, authzDetailsVerification?: ((authDetails: AuthorizationDetails) => Promise<Result<null, Error>>) | undefined, vpCredentialVerificationCallback?: CredentialAdditionalVerification | undefined, preAuthCallback?: undefined | ((clientId: string | undefined, preCode: string, pin?: string) => Promise<Result<string, Error>>));
     /**
-     * Allows to add support for a new DID Method
-     * @param methodName DID Method name
-     * @param resolver Object responsible for obtaining the DID Documents
-     * related to the DID specified
+     * Adds support for a new DID method by extending the internal resolver.
+     *
+     * @param methodName - The DID method name (e.g., 'key', 'web').
+     * @param resolver - A Resolvable that can resolve DIDs for the given method.
      */
     addDidMethod(methodName: string, resolver: Resolvable): void;
     /**
-     * Allows to create a new Authorisation request in which an ID Token
-     * is requested
-     * @param clientAuthorizationEndpoint Endpoint of the authorisation
-     * server of the client
-     * @param audience "aud" parameter for the generated JWT.
-     * @param redirectUri URI to which the client should deliver the
-     * authorisation response to
-     * @param requestPurpose Allows to specify if the end purpose of the token
-     * is for a VC issuance or for a verification and also allows to set
-     * a verified authz request.
-     * @param additionalParameters Additional parameters that handle
-     * issues related to the content of the ID Token.
-     * @returns The ID Token Request
+     * Creates a new ID Token Request object to initiate an OpenID authorization flow.
+     *
+     * @param clientAuthorizationEndpoint - The client's authorization endpoint URL.
+     * @param audience - Audience value to be used as the JWT 'aud' claim.
+     * @param redirectUri - Redirect URI where the response should be sent.
+     * @param requestPurpose - Purpose of the request (e.g., issuance or verification).
+     * @param additionalParameters - Optional parameters for token customization.
+     * @returns An instance of {@link IdTokenRequest}.
      */
     createIdTokenRequest(clientAuthorizationEndpoint: string, audience: string, redirectUri: string, requestPurpose: RpTypes.RequestPurpose, additionalParameters?: RpTypes.CreateTokenRequestOptionalParams): Promise<IdTokenRequest>;
     /**
-     * Method that allows to build an VP Token Request directly, without
-     * the need of a previous Base Authz Request
-     * @param presentationDefinition The presentation definition to indicate to
-     * the user
-     * @param additionalParameters Additional parameters that handle
-     * issues related to the content of the VP Token.
-     * @returns A VP Token Request
-     */
+       * Creates a direct VP Token Request for verification purposes, without a prior base authz.
+       *
+       * @param presentationDefinition - Presentation definition or URI.
+       * @param redirectUri - Redirect URI where the response should be sent.
+       * @param additionalParameters - Optional parameters to customize the VP request.
+       * @returns An instance of {@link VpTokenRequest}.
+       */
     directVpTokenRequestForVerification(presentationDefinition: RpTypes.PresentationDefinitionLocation, redirectUri: string, additionalParameters?: RpTypes.CreateTokenRequestOptionalParams): Promise<VpTokenRequest>;
+    /**
+       * Creates an ID Token request for verification scenarios using the 'direct_post' response mode,
+       * without requiring a prior authorization request.
+       *
+       * @param redirectUri - Redirect URI where the ID Token response should be delivered.
+       * @param additionalParameters - Optional parameters to customize the ID Token payload.
+       * @returns A signed ID Token request
+       */
     directIdTokenRequestForVerification(redirectUri: string, additionalParameters?: RpTypes.CreateTokenRequestOptionalParams): Promise<IdTokenRequest>;
     /**
-     * Allows to create a new Authorisation request in which an VP Token
-     * is requested
-     * @param clientAuthorizationEndpoint Endpoint of the authorisation
-     * server of the client
-     * @param audience "aud" parameter for the generated JWT.
-     * @param redirectUri URI to which the client should deliver the
-     * authorisation response to
-     * @param presentationDefinition Allows to define how the presentation
-     * definition is going to be specified for the user
-     * @param requestPurpose Allows to specify if the end purpose of the token
-     * is for a VC issuance or for a verification and also allows to set
-     * a verified authz request.
-     * @param additionalParameters Additional parameters that handle
-     * issues related to the content of the VP Token.
-     * @returns The VP Token Request
+     * Creates a new VP Token request based on a base authorization request and presentation definition.
+     *
+     * This method is used in issuance or verification flows where the user has already gone through a
+     * base authorization phase and a `vp_token` is expected as the response.
+     *
+     * @param clientAuthorizationEndpoint - The endpoint to which the client will send the authorization request.
+     * @param audience - The audience for the VP Token, typically the verifier's identifier.
+     * @param redirectUri - The URI where the client expects to receive the response.
+     * @param presentationDefinition - A definition or reference describing what credentials are expected.
+     * @param requestPurpose - The purpose of the request, including the prior verified authz request.
+     * @param additionalParameters - Optional customization parameters (expiration time, scope, etc).
+     * @returns A {@link VpTokenRequest} containing all request parameters and a signed token.
      */
     createVpTokenRequest(clientAuthorizationEndpoint: string, audience: string, redirectUri: string, presentationDefinition: RpTypes.PresentationDefinitionLocation, requestPurpose: RpTypes.RequestPurpose, additionalParameters?: RpTypes.CreateTokenRequestOptionalParams): Promise<VpTokenRequest>;
     private createNonceForPostBaseAuthz;
     /**
-     * Allows to verify an authorisation request sent by a client
-     * @param request The request sent by the client
-     * @returns Verified Authz Reques with some of the client metadata extracted
+     * Verifies an incoming Authorization Request, extracting and validating parameters from a JWT or plain request.
+     *
+     * If a signed request object is present, this method validates the JWT signature, ensures all mandatory fields
+     * are available (like client_metadata and jwks_uri), and checks supported algorithms against metadata policies.
+     *
+     * It also validates `authorization_details` if configured, ensures the `issuer_state` is acceptable,
+     * and resolves client metadata.
+     *
+     * @param request - The Authorization Request received from the Holder Wallet or client.
+     * @returns A verified request object including client metadata and optional service wallet JWK.
+     * @throws {InvalidRequest} If the request is malformed or uses unsupported features.
      */
     verifyBaseAuthzRequest(request: AuthzRequestWithJWT): Promise<RpTypes.VerifiedBaseAuthzRequest>;
     private createNonceForPostAuthz;
     private checkNonceStateForPostBaseAuthz;
     /**
-     * Allows to verify an ID Token Response sent by a client
-     * @param idTokenResponse The authorisation response to verify
-     * @returns The verified ID Token Response with the DID Document of the
-     * associated token issuer.
-     * @throws If data provided is incorrect
+     * Verifies an ID Token response received from a client.
+     *
+     * This method checks the token's structure, signature (if enabled), and expiration. It also validates
+     * that the `nonce` and `state` values match those previously issued during the authorization request.
+     * It ensures the DID associated with the token can be resolved, and the public key referenced by the `kid`
+     * is present and valid.
+     *
+     * @param idTokenResponse - The response object containing the ID Token to be verified.
+     * @param checkTokenSignature - Whether the signature of the token should be verified. Enabled by default.
+     * @returns A verified response with the subject, DID Document, redirect URI and any associated authorization code.
+     * @throws {InvalidRequest | AccessDenied} If validation fails due to expiration, audience mismatch,
+     * incorrect issuer, or inability to resolve the DID or verify the token.
      */
     verifyIdTokenResponse(idTokenResponse: IdTokenResponse, checkTokenSignature?: boolean): Promise<RpTypes.VerifiedIdTokenResponse>;
     /**
-     * Allows to verify an VP Token Response sent by a client
-     * @param vpTokenResponse The authorisation response to verify
-     * @param presentationDefinition The presentation definition to use to
-     * verify the VP
-     * @param vcSignatureVerification A flag that can be used to specify if the signature
-     * of the VC should be checked. True by default
-     * @returns The verified VP Token Response with holder DID and the data
-     * extracted from the VCs of the VP
-     * @throws If data provided is incorrect
+     * Verifies a VP Token Response from the client.
+     *
+     * This method verifies the verifiable presentation (VP) submitted in the response,
+     * ensuring it meets the expected presentation definition and signature requirements.
+     * It also verifies the nonce state and returns relevant extracted data, including
+     * the internal VC data and an optional authorization code.
+     *
+     * @param vpTokenResponse - The response containing the VP Token and presentation submission.
+     * @param presentationDefinition - The presentation definition that the VP must fulfill.
+     * @param vcSignatureVerification - Whether to validate the VC signatures inside the VP. Defaults to true.
+     * @returns A verified response containing the VP Token, internal VC data, and optional authz code.
+     * @throws {InternalNonceError | OpenIdError} If nonce verification, signature checks, or VC validation fails.
      */
-    verifyVpTokenResponse(vpTokenResponse: VpTokenResponse, presentationDefinition: DIFPresentationDefinition, // TODO: Convert this to a callback
-    vcSignatureVerification?: boolean): Promise<RpTypes.VerifiedVpTokenResponse>;
+    verifyVpTokenResponse(vpTokenResponse: VpTokenResponse, presentationDefinition: DIFPresentationDefinition, vcSignatureVerification?: boolean): Promise<RpTypes.VerifiedVpTokenResponse>;
     private processNonceForPostAuthz;
     private generateCNonce;
     /**
-     * Allows to generate a token response from a token request
-     * @param tokenRequest The token request sent by the client
-     * @param generateIdToken Flag indicating whether, together with
-     * the access token, an ID Token should be generated.
-     * @param tokenSignCallback Callback that manages the signature of the token.
-     * @param audience JWT "aud" to include in the generated access token
-     * @param authServerPublicKeyJwk The JWK used by the authServer to verify
-     * the authz code
-     * @returns Token response with the generated access token
-     * @throws If data provided is incorrect
+     * Generates an access token based on the token request and previously validated authorization.
+     *
+     * Supports `authorization_code` and `pre-authorized_code` grant types. Depending on the grant type,
+     * it verifies the authorization code or invokes a pre-auth callback. Also optionally generates an ID Token
+     * if requested, and includes any additional claims (e.g., `pin`, `vc_types`, or `verification_scope`).
+     *
+     * @param tokenRequest - The request object containing grant type and related credentials.
+     * @param generateIdToken - Whether to include an ID Token in the response.
+     * @param audience - Audience value for the access token.
+     * @param authServerPublicKeyJwk - Public JWK used to verify the authorization code.
+     * @returns A {@link TokenResponse} including access token, optional ID token, and c_nonce values.
+     * @throws {UnsupportedGrantType | InvalidGrant | InvalidRequest | InsufficienteParamaters} If request validation fails.
      */
     generateAccessToken(tokenRequest: TokenRequest, generateIdToken: boolean, audience: string, authServerPublicKeyJwk: JWK): Promise<TokenResponse>;
     private validateClientMetadata;
