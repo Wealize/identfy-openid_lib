@@ -58,7 +58,7 @@ export declare class OpenIDReliyingParty {
      * @param authzDetailsVerification Optional callback that can be used to check
      * the authorization details of a Authz Request, but only if provided
      * @param vpCredentialVerificationCallback Optional callback that is used during
-     * VP verification to check the credential data agains the use case logic.
+     * VP verification to check the credential data against the use case logic.
      * @param preAuthCallback Optional callback that is used to check the validity
      * of a Pre-Authorization Code
      */
