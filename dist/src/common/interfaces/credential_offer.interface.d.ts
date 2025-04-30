@@ -12,7 +12,7 @@ export interface GrantPreAuthorizeCode {
  * accordance to OID4VCI
  */
 export interface GrantAuthorizationCode {
-    issuer_state: string;
+    issuer_state?: string;
 }
 /**
  * Defines the Grant field for a Credential Offer in

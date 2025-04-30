@@ -1,14 +1,16 @@
 /**
- * Abstract class that provided an interface to a VC Issuer
- * thorugh which it can get the information related to a VC
+ * Abstract class that defines an interface for interacting with a Verifiable Credential (VC) Issuer.
+ * It enables clients to retrieve information related to VCs and handle specific issuance flows
+ * such as deferred credential issuance.
  */
 export class CredentialDataManager {
     /**
-     * Allows to obtain the true identifier of the credential subject. This method
-     * can be overwritten if needed and can be useful when working with DID URL syntax
-     * @param _accessTokenSubject The subject ID contained in an Access Token
-     * @param proofIssuer The subject ID contained in a control proof
-     * @returns
+     * Resolves the true subject identifier of a credential. This method can be overridden to support
+     * custom subject resolution logic, for example when working with DID URLs or other identifier schemes.
+     *
+     * @param _accessTokenSubject - The `sub` (subject) claim from the Access Token.
+     * @param proofIssuer - The identifier of the entity that signed the proof.
+     * @returns The resolved subject identifier.
      */
     async resolveCredentialSubject(_accessTokenSubject, proofIssuer) {
         return proofIssuer;

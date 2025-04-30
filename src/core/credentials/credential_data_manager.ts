@@ -7,28 +7,38 @@ import {
 import {W3CVerifiableCredentialFormats} from '@/formats';
 
 /**
- * Abstract class that provided an interface to a VC Issuer
- * thorugh which it can get the information related to a VC
+ * Abstract class that defines an interface for interacting with a Verifiable Credential (VC) Issuer.
+ * It enables clients to retrieve information related to VCs and handle specific issuance flows
+ * such as deferred credential issuance.
  */
 export abstract class CredentialDataManager {
   /**
-   * Allows to get all the related data to a VC, like the credentialSubject data,
-   * the terms of use and the status information.
-   * @param types The types of the VC
-   * @param holder The future holder of the VC
+   * Retrieves all relevant data associated with a Verifiable Credential (VC), including the credentialSubject,
+   * terms of use, and status information.
+   *
+   * @param types - The types (contexts) of the credential being requested.
+   * @param holder - The DID or identifier of the future credential holder.
+   * @returns A {@link CredentialDataResponse} containing information necessary for credential issuance.
    */
   abstract getCredentialData(
     types: string[],
     holder: string,
   ): Promise<CredentialDataResponse>;
 
-  // TODO: Set VC format. This callback could fail if the acceptance token is wrong
   /**
-   * Allows to exchange an acepptance Token of a deferred flow for another one or for
-   * a VC if it is already available
-   * @param acceptanceToken The token to exchange
+   * Handles the deferred credential flow by exchanging an acceptance token for either a finalized VC
+   * (if available) or another acceptance token.
+   *
+   * This method is typically used when the credential is not immediately issued, and further validation
+   * or processing is required before completion.
+   *
+   * @param acceptanceToken - The token received during the initial deferred flow.
+   * @returns A {@link Result} containing either the issued credential data or updated deferred information,
+   * or an Error in case of failure.
    */
-  abstract deferredExchange(acceptanceToken: string): Promise<
+  abstract deferredExchange(
+    acceptanceToken: string,
+  ): Promise<
     Result<
       | (InTimeCredentialData & {
           format: W3CVerifiableCredentialFormats;
@@ -40,11 +50,12 @@ export abstract class CredentialDataManager {
   >;
 
   /**
-   * Allows to obtain the true identifier of the credential subject. This method
-   * can be overwritten if needed and can be useful when working with DID URL syntax
-   * @param _accessTokenSubject The subject ID contained in an Access Token
-   * @param proofIssuer The subject ID contained in a control proof
-   * @returns
+   * Resolves the true subject identifier of a credential. This method can be overridden to support
+   * custom subject resolution logic, for example when working with DID URLs or other identifier schemes.
+   *
+   * @param _accessTokenSubject - The `sub` (subject) claim from the Access Token.
+   * @param proofIssuer - The identifier of the entity that signed the proof.
+   * @returns The resolved subject identifier.
    */
   async resolveCredentialSubject(
     _accessTokenSubject: string,

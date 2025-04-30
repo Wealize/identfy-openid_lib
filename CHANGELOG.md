@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- [[MEBSIVECTO-358] [OpenID Lib] Añadir soporte para ID Tokens para verificación](https://izertis.atlassian.net/browse/MEBSIVECTO-358)
 - [[PER-123] Actualizar las versiones de Node de los proyectos de Identfy (OpenId Lib)](https://wealize.atlassian.net/browse/PER-123)
 - [[INCPP122DG-167] Refactorizar OpenId Lib](https://wealize.atlassian.net/browse/INCPP122DG-167)
 - [INCPP122DG-52] feat: add resolveCredentialSubject
